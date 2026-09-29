@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🐰 Code Rabbit – กระต่ายน้อยส่งแครอท</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@400;600;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Prompt', sans-serif;
+            background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
+            touch-action: manipulation; /* Prevent zoom on double tap */
+        }
+        
+        .map-grid {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            grid-template-rows: repeat(6, 1fr);
+            gap: 2px;
+            background-color: #8b5a2b;
+            padding: 4px;
+            border-radius: 12px;
+            position: relative;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+        }
+
+        .tile {
+            background-color: #a3d977;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            position: relative;
+            box-shadow: inset 0 -3px 0 rgba(0,0,0,0.1);
+        }
+
+        .tile-obstacle {
+            background-color: #7fa95d;
+        }
+
+        #rabbit {
+            position: absolute;
+            width: calc(100% / 6 - 4px);
+            height: calc(100% / 6 - 4px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2.2rem;
+            transition: all 0.4s ease-in-out;
+            z-index: 10;
+            filter: drop-shadow(0 4px 4px rgba(0,0,0,0.3));
+        }
+
+        .command-card {
+            transition: transform 0.1s, box-shadow 0.1s;
+            cursor: grab;
+            user-select: none;
+        }
+        
+        .command-card:active {
+            cursor: grabbing;
+            transform: scale(0.95);
+        }
+
+        .command-slot {
+            min-height: 60px;
+            border: 2px dashed #cbd5e1;
+            transition: background-color 0.2s;
+        }
+        
+        .command-slot.drag-over {
+            background-color: #e2e8f0;
+            border-color: #3b82f6;
+        }
+
+        .running-highlight {
+            box-shadow: 0 0 0 4px #fbbf24, 0 0 15px #fbbf24;
+            transform: scale(1.05);
+            z-index: 5;
+        }
+
+        /* Animations */
+        @keyframes bounceIn {
+            0% { transform: scale(0.3); opacity: 0; }
+            50% { transform: scale(1.05); opacity: 1; }
+            70% { transform: scale(0.9); }
+            100% { transform: scale(1); }
+        }
+        .modal-animate {
+            animation: bounceIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+            20%, 40%, 60%, 80% { transform: translateX(5px); }
+        }
+        .shake-animate {
+            animation: shake 0.5s;
+        }
+
+        /* Scrollbar for code area */
+        #code-sequence::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        #code-sequence::-webkit-scrollbar-thumb {
+            background-color: #cbd5e1;
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col overflow-x-hidden text-gray-800">
+
+    <header class="bg-white/80 backdrop-blur-md shadow-md sticky top-0 z-20">
+        <div class="max-w-6xl mx-auto px-4 py-3 flex justify-between items-center flex-wrap gap-2">
+            <div class="flex items-center gap-3">
+                <div class="bg-blue-500 text-white p-2 rounded-lg shadow-sm">
+                    <span class="text-2xl">🐰</span>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold text-blue-700 leading-tight">Code Rabbit</h1>
+                    <p class="text-xs font-semibold text-blue-500">กระต่ายน้อยส่งแครอท</p>
+                </div>
+            </div>
+            
+            <div class="flex gap-4 sm:gap-6 flex-wrap justify-center font-bold text-lg">
+                <div class="flex items-center gap-1 bg-yellow-100 px-3 py-1 rounded-full text-yellow-700 shadow-sm border border-yellow-200">
+                    <span>🏆</span> <span id="ui-level">ด่าน: 1/5</span>
+                </div>
+                <div class="flex items-center gap-1 bg-orange-100 px-3 py-1 rounded-full text-orange-700 shadow-sm border border-orange-200">
+                    <span>⭐</span> <span id="ui-score">0</span>
+                </div>
+                <div class="flex items-center gap-1 bg-red-100 px-3 py-1 rounded-full text-red-700 shadow-sm border border-red-200">
+                    <span>❤️</span> <span id="ui-lives">3</span>
+                </div>
+                <div class="flex items-center gap-1 bg-blue-100 px-3 py-1 rounded-full text-blue-700 shadow-sm border border-blue-200">
+                    <span>⏱️</span> <span id="ui-time">00:00</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-grow max-w-6xl w-full mx-auto p-4 flex flex-col lg:flex-row gap-6 relative" id="main-content" style="display:none;">
+        
+        <!-- Left: Map Area -->
+        <div class="lg:w-1/2 flex flex-col items-center">
+            <div class="bg-white p-4 rounded-2xl shadow-xl w-full max-w-md border-4 border-white">
+                <div id="map-container" class="map-grid w-full aspect-square">
+                    <!-- Tiles will be generated by JS -->
+                    <div id="rabbit">🐰</div>
+                </div>
+            </div>
+            <p class="mt-4 text-center text-gray-600 font-medium">ช่วยกระต่ายเดินไปเก็บแครอทให้สำเร็จ!</p>
+        </div>
+
+        <!-- Right: Coding Area -->
+        <div class="lg:w-1/2 flex flex-col gap-4">
+            
+            <!-- Commands Palette -->
+            <div class="bg-white p-4 rounded-2xl shadow-lg">
+                <h2 class="text-lg font-bold text-gray-700 mb-3 border-b pb-2">📦 กล่องคำสั่ง (ลากหรือคลิก)</h2>
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3" id="command-palette">
+                    <!-- Command blocks -->
+                    <div class="command-card bg-blue-500 hover:bg-blue-400 text-white font-bold p-3 rounded-xl shadow-[0_4px_0_#1d4ed8] text-center flex flex-col items-center justify-center gap-1" draggable="true" data-type="forward" onclick="addCommand('forward')">
+                        <span class="text-2xl">⬆️</span>
+                        <span class="text-xs">เดินหน้า</span>
+                    </div>
+                    <div class="command-card bg-purple-500 hover:bg-purple-400 text-white font-bold p-3 rounded-xl shadow-[0_4px_0_#6b21a8] text-center flex flex-col items-center justify-center gap-1" draggable="true" data-type="left" onclick="addCommand('left')">
+                        <span class="text-2xl">⬅️</span>
+                        <span class="text-xs">เลี้ยวซ้าย</span>
+                    </div>
+                    <div class="command-card bg-pink-500 hover:bg-pink-400 text-white font-bold p-3 rounded-xl shadow-[0_4px_0_#be185d] text-center flex flex-col items-center justify-center gap-1" draggable="true" data-type="right" onclick="addCommand('right')">
+                        <span class="text-2xl">➡️</span>
+                        <span class="text-xs">เลี้ยวขวา</span>
+                    </div>
+                    <div class="command-card bg-orange-500 hover:bg-orange-400 text-white font-bold p-3 rounded-xl shadow-[0_4px_0_#c2410c] text-center flex flex-col items-center justify-center gap-1" draggable="true" data-type="collect" onclick="addCommand('collect')">
+                        <span class="text-2xl">🥕</span>
+                        <span class="text-xs">เก็บแครอท</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sequence Area (Dropzone) -->
+            <div class="bg-white p-4 rounded-2xl shadow-lg flex-grow flex flex-col">
+                <div class="flex justify-between items-center mb-3 border-b pb-2">
+                    <h2 class="text-lg font-bold text-gray-700">📝 พื้นที่เขียนโปรแกรม</h2>
+                    <button onclick="clearCommands()" class="text-sm bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1 rounded-lg font-semibold transition">
+                        🗑️ ล้างทั้งหมด
+                    </button>
+                </div>
+                
+                <div id="drop-zone" class="command-slot flex-grow bg-gray-50 rounded-xl p-3 flex flex-wrap content-start gap-2 overflow-y-auto relative">
+                    <div id="empty-message" class="absolute inset-0 flex items-center justify-center text-gray-400 font-medium pointer-events-none">
+                        ลากคำสั่งมาวางที่นี่...
+                    </div>
+                    <!-- Added commands will appear here -->
+                </div>
+
+                <!-- Run Controls -->
+                <div class="mt-4 pt-4 border-t flex justify-end">
+                    <button id="btn-run" onclick="runSequence()" class="bg-green-500 hover:bg-green-400 text-white text-xl font-bold py-3 px-8 rounded-full shadow-[0_6px_0_#15803d] active:shadow-[0_0px_0_#15803d] active:translate-y-[6px] transition-all flex items-center gap-2">
+                        ▶️ RUN (เริ่มทำงาน)
+                    </button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Screen Overlay -->
+    <div id="modal-overlay" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center">
+        
+        <!-- Start Screen -->
+        <div id="modal-start" class="bg-white p-8 rounded-3xl shadow-2xl max-w-md w-[90%] text-center modal-animate relative overflow-hidden">
+            <div class="absolute top-[-50px] right-[-50px] text-9xl opacity-20">🐰</div>
+            <h1 class="text-4xl font-extrabold text-blue-600 mb-2">Code Rabbit</h1>
+            <p class="text-xl text-gray-600 font-bold mb-6">กระต่ายน้อยส่งแครอท 🥕</p>
+            <div class="bg-blue-50 text-left p-4 rounded-xl mb-6 text-sm text-blue-800 space-y-2 font-medium">
+                <p>🎮 <b>วิธีเล่น:</b></p>
+                <p>1. ลากการ์ดคำสั่ง (หรือคลิก) มาเรียงในพื้นที่เขียนโปรแกรม</p>
+                <p>2. จัดลำดับให้กระต่ายเดินไปหา 🥕</p>
+                <p>3. ต้องใช้คำสั่ง "เก็บแครอท" เมื่อถึงเป้าหมาย</p>
+                <p>4. กดปุ่ม RUN เพื่อดูผลลัพธ์</p>
+            </div>
+            <button onclick="startGame()" class="w-full bg-blue-500 hover:bg-blue-400 text-white text-2xl font-bold py-4 rounded-2xl shadow-[0_6px_0_#1d4ed8] active:shadow-[0_0px_0_#1d4ed8] active:translate-y-[6px] transition-all">
+                เริ่มเล่นเกม! 🚀
+            </button>
+        </div>
+
+        <!-- Level Complete Screen -->
+        <div id="modal-win" class="bg-white p-8 rounded-3xl shadow-2xl max-w-sm w-[90%] text-center hidden relative overflow-hidden">
+            <div class="text-6xl mb-4 animate-bounce">🎉</div>
+            <h2 class="text-3xl font-extrabold text-green-500 mb-2">เก่งมาก!</h2>
+            <p class="text-gray-600 font-bold mb-6" id="win-message">เก็บแครอทสำเร็จ</p>
+            <div class="bg-green-50 p-4 rounded-xl mb-6 text-green-800 font-bold">
+                คะแนนด่านนี้: <span id="win-score">+100</span> ⭐
+            </div>
+            <button onclick="nextLevel()" class="w-full bg-green-500 hover:bg-green-400 text-white text-xl font-bold py-3 rounded-2xl shadow-[0_6px_0_#15803d] active:shadow-[0_0px_0_#15803d] active:translate-y-[6px] transition-all">
+                ด่านต่อไป ➡️
+            </button>
+        </div>
+
+        <!-- Try Again Screen -->
+        <div id="modal-lose" class="bg-white p-8 rounded-3xl shadow-2xl max-w-sm w-[90%] text-center hidden relative overflow-hidden">
+            <div class="text-6xl mb-4">🐞</div>
+            <h2 class="text-3xl font-extrabold text-red-500 mb-2">ลองใหม่นะ!</h2>
+            <p class="text-gray-700 font-bold mb-6" id="lose-message">เดินผิดทาง หรือลืมเก็บแครอท?</p>
+            <p class="text-red-500 font-bold mb-6">-1 ❤️</p>
+            <button onclick="retryLevel()" class="w-full bg-orange-500 hover:bg-orange-400 text-white text-xl font-bold py-3 rounded-2xl shadow-[0_6px_0_#c2410c] active:shadow-[0_0px_0_#c2410c] active:translate-y-[6px] transition-all">
+                แก้ไขคำสั่ง 🔄
+            </button>
+        </div>
+
+        <!-- Game Over Screen -->
+        <div id="modal-gameover" class="bg-white p-8 rounded-3xl shadow-2xl max-w-sm w-[90%] text-center hidden relative overflow-hidden">
+            <div class="text-6xl mb-4">💀</div>
+            <h2 class="text-3xl font-extrabold text-gray-800 mb-2">จบเกม!</h2>
+            <p class="text-gray-600 font-bold mb-6">ชีวิตหมดแล้ว พยายามใหม่นะ</p>
+            <div class="bg-gray-100 p-4 rounded-xl mb-6 text-gray-800 font-bold">
+                คะแนนรวม: <span id="final-score">0</span> ⭐
+            </div>
+            <button onclick="resetGame()" class="w-full bg-blue-500 hover:bg-blue-400 text-white text-xl font-bold py-3 rounded-2xl shadow-[0_6px_0_#1d4ed8] active:shadow-[0_0px_0_#1d4ed8] active:translate-y-[6px] transition-all">
+                เริ่มเล่นใหม่ 🔄
+            </button>
+        </div>
+        
+        <!-- Victory Screen -->
+        <div id="modal-victory" class="bg-white p-8 rounded-3xl shadow-2xl max-w-md w-[90%] text-center hidden relative overflow-hidden">
+            <div class="text-6xl mb-4">🏆</div>
+            <h2 class="text-3xl font-extrabold text-yellow-500 mb-2">ชนะแล้ว!</h2>
+            <p class="text-gray-600 font-bold mb-4">คุณคือยอดนักเขียนโปรแกรม 🐰</p>
+            <div class="bg-yellow-50 p-4 rounded-xl mb-6 text-yellow-800 font-bold space-y-2">
+                <p>ผ่านครบทุกด่าน!</p>
+                <p class="text-2xl">คะแนนรวม: <span id="victory-score">0</span> ⭐</p>
+            </div>
+            <button onclick="resetGame()" class="w-full bg-purple-500 hover:bg-purple-400 text-white text-xl font-bold py-3 rounded-2xl shadow-[0_6px_0_#7e22ce] active:shadow-[0_0px_0_#7e22ce] active:translate-y-[6px] transition-all">
+                เล่นอีกครั้ง 🔄
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // Game Configuration & State
+        const GRID_SIZE = 6;
+        
+        // Map Codes: 0 = Empty (Grass), 1 = Obstacle (Tree/Rock), 2 = Carrot
+        // Directions: 0 = North, 1 = East, 2 = South, 3 = West
+        const levelData = [
+            { // Level 1: Simple straight line
+                grid: [
+                    [0,0,0,0,0,0],
+                    [0,0,0,0,0,0],
+                    [0,0,0,2,0,0],
+                    [0,0,0,0,0,0],
+                    [0,0,0,0,0,0],
+                    [0,0,0,0,0,0]
+                ],
+                start: { x: 1, y: 2, dir: 1 },
+                timeLimit: 30
+            },
+            { // Level 2: One turn
+                grid: [
+                    [0,0,0,0,0,0],
+                    [0,0,0,0,0,0],
+                    [0,0,0,0,0,0],
+                    [0,2,0,0,0,0],
+                    [0,0,0,0,0,0],
+                    [0,0,0,0,0,0]
+                ],
+                start: { x: 3, y: 1, dir: 2 },
+                timeLimit: 40
+            },
+            { // Level 3: Obstacle avoidance
+                grid: [
+                    [0,0,0,0,0,0],
+                    [0,1,1,0,0,0],
+                    [0,0,1,0,0,0],
+                    [1,0,0,0,1,0],
+                    [2,1,0,0,0,0],
+                    [0,0,0,0,0,0]
+                ],
+                start: { x: 3, y: 4, dir: 3 },
+                timeLimit: 50
+            },
+            { // Level 4: Zig-zag
+                grid: [
+                    [0,0,0,0,0,0],
+                    [0,1,1,1,2,0],
+                    [0,0,0,1,0,0],
+                    [1,1,0,1,0,0],
+                    [0,0,0,0,0,0],
+                    [0,0,0,0,0,0]
+                ],
+                start: { x: 0, y: 4, dir: 1 },
+                timeLimit: 60
+            },
+            { // Level 5: Complex Maze
+                grid: [
+                    [2,1,0,0,0,0],
+                    [0,1,0,1,1,0],
+                    [0,1,0,0,0,0],
+                    [0,1,1,1,1,0],
+                    [0,0,0,0,0,0],
+                    [1,1,1,0,1,1]
+                ],
+                start: { x: 3, y: 5, dir: 0 },
+                timeLimit: 90
+            }
+        ];
+
+        let state = {
+            level: 0,
+            score: 0,
+            lives: 3,
+            timeRemaining: 0,
+            timerId: null,
+            commands: [],
+            isExecuting: false,
+            rabbit: { x: 0, y: 0, dir: 1 },
+            initialRabbit: { x: 0, y: 0, dir: 1 }
+        };
+
+        // DOM Elements
+        const elMapContainer = document.getElementById('map-container');
+        const elRabbit = document.getElementById('rabbit');
+        const elDropZone = document.getElementById('drop-zone');
+        const elEmptyMsg = document.getElementById('empty-message');
+        
+        // UI Updates
+        const uiLevel = document.getElementById('ui-level');
+        const uiScore = document.getElementById('ui-score');
+        const uiLives = document.getElementById('ui-lives');
+        const uiTime = document.getElementById('ui-time');
+
+        // Modals
+        const overlay = document.getElementById('modal-overlay');
+        const modals = {
+            start: document.getElementById('modal-start'),
+            win: document.getElementById('modal-win'),
+            lose: document.getElementById('modal-lose'),
+            gameover: document.getElementById('modal-gameover'),
+            victory: document.getElementById('modal-victory')
+        };
+
+        // Command Data Mapping for UI
+        const cmdConfig = {
+            'forward': { color: 'bg-blue-500', shadow: 'shadow-[0_4px_0_#1d4ed8]', text: 'เดินหน้า', icon: '⬆️' },
+            'left':    { color: 'bg-purple-500', shadow: 'shadow-[0_4px_0_#6b21a8]', text: 'เลี้ยวซ้าย', icon: '⬅️' },
+            'right':   { color: 'bg-pink-500', shadow: 'shadow-[0_4px_0_#be185d]', text: 'เลี้ยวขวา', icon: '➡️' },
+            'collect': { color: 'bg-orange-500', shadow: 'shadow-[0_4px_0_#c2410c]', text: 'เก็บแครอท', icon: '🥕' }
+        };
+
+        function showModal(id) {
+            overlay.style.display = 'flex';
+            Object.values(modals).forEach(m => m.classList.add('hidden'));
+            modals[id].classList.remove('hidden');
+            modals[id].classList.remove('modal-animate');
+            void modals[id].offsetWidth; // Trigger reflow
+            modals[id].classList.add('modal-animate');
+        }
+
+        function hideModals() {
+            overlay.style.display = 'none';
+        }
+
+        function updateUI() {
+            uiLevel.innerText = `ด่าน: ${state.level + 1}/${levelData.length}`;
+            uiScore.innerText = state.score;
+            uiLives.innerText = state.lives;
+            updateTimerDisplay();
+        }
+
+        function updateTimerDisplay() {
+            const m = Math.floor(state.timeRemaining / 60).toString().padStart(2, '0');
+            const s = (state.timeRemaining % 60).toString().padStart(2, '0');
+            uiTime.innerText = `${m}:${s}`;
+            if(state.timeRemaining <= 10 && state.timeRemaining > 0) {
+                uiTime.parentElement.classList.add('animate-pulse', 'bg-red-200');
+            } else {
+                uiTime.parentElement.classList.remove('animate-pulse', 'bg-red-200');
+            }
+        }
+
+        function renderMap() {
+            // Clear existing map tiles
+            const tiles = elMapContainer.querySelectorAll('.tile');
+            tiles.forEach(t => t.remove());
+
+            const level = levelData[state.level];
+            
+            for (let y = 0; y < GRID_SIZE; y++) {
+                for (let x = 0; x < GRID_SIZE; x++) {
+                    const cell = level.grid[y][x];
+                    const tile = document.createElement('div');
+                    tile.className = 'tile';
+                    
+                    if (cell === 1) {
+                        tile.classList.add('tile-obstacle');
+                        tile.innerText = '🌳'; // Tree obstacle
+                    } else if (cell === 2) {
+                        tile.innerText = '🥕'; // Carrot target
+                    }
+                    
+                    elMapContainer.appendChild(tile);
+                }
+            }
+            // Ensure rabbit stays on top
+            elMapContainer.appendChild(elRabbit);
+            updateRabbitPosition();
+        }
+
+        function updateRabbitPosition() {
+            const step = 100 / GRID_SIZE;
+            // Add slight padding offset if needed, but flex grid makes it absolute position relative to container size
+            elRabbit.style.left = `${state.rabbit.x * step}%`;
+            elRabbit.style.top = `${state.rabbit.y * step}%`;
+            
+            // Rotation based on direction
+            // 0: N (-90deg), 1: E (0deg), 2: S (90deg), 3: W (0deg + scaleX(-1))
+            let transform = '';
+            switch(state.rabbit.dir) {
+                case 0: transform = 'rotate(-90deg)'; break;
+                case 1: transform = 'rotate(0deg) scaleX(1)'; break;
+                case 2: transform = 'rotate(90deg)'; break;
+                case 3: transform = 'rotate(0deg) scaleX(-1)'; break;
+            }
+            elRabbit.style.transform = transform;
+        }
+
+        function renderCommands() {
+            // Remove current command blocks
+            const blocks = elDropZone.querySelectorAll('.seq-cmd');
+            blocks.forEach(b => b.remove());
+
+            if (state.commands.length === 0) {
+                elEmptyMsg.style.display = 'flex';
+            } else {
+                elEmptyMsg.style.display = 'none';
+                
+                state.commands.forEach((cmd, index) => {
+                    const block = document.createElement('div');
+                    const conf = cmdConfig[cmd];
+                    block.className = `seq-cmd ${conf.color} text-white font-bold px-3 py-2 rounded-lg shadow-sm flex items-center gap-2 cursor-pointer transition hover:opacity-80`;
+                    block.innerHTML = `<span>${conf.icon}</span> <span class="text-sm">${conf.text}</span>`;
+                    block.id = `cmd-idx-${index}`;
+                    
+                    // Click to remove
+                    block.onclick = () => removeCommand(index);
+                    
+                    elDropZone.appendChild(block);
+                });
+            }
+        }
+
+        function addCommand(cmd) {
+            if (state.isExecuting) return;
+            state.commands.push(cmd);
+            renderCommands();
+        }
+
+        function removeCommand(index) {
+            if (state.isExecuting) return;
+            state.commands.splice(index, 1);
+            renderCommands();
+        }
+
+        function clearCommands() {
+            if (state.isExecuting) return;
+            state.commands = [];
+            renderCommands();
+        }
+
+        // HTML5 Drag and Drop for Palette to Dropzone
+        const draggables = document.querySelectorAll('.command-card');
+        
+        draggables.forEach(draggable => {
+            draggable.addEventListener('dragstart', (e) => {
+                if(state.isExecuting) { e.preventDefault(); return; }
+                e.dataTransfer.setData('text/plain', draggable.dataset.type);
+                draggable.style.opacity = '0.5';
+            });
+            
+            draggable.addEventListener('dragend', () => {
+                draggable.style.opacity = '1';
+            });
+        });
+
+        elDropZone.addEventListener('dragover', (e) => {
+            if(state.isExecuting) return;
+            e.preventDefault();
+            elDropZone.classList.add('drag-over');
+        });
+
+        elDropZone.addEventListener('dragleave', () => {
+            elDropZone.classList.remove('drag-over');
+        });
+
+        elDropZone.addEventListener('drop', (e) => {
+            if(state.isExecuting) return;
+            e.preventDefault();
+            elDropZone.classList.remove('drag-over');
+            const cmdType = e.dataTransfer.getData('text/plain');
+            if (cmdType && cmdConfig[cmdType]) {
+                addCommand(cmdType);
+            }
+        });
+
+
+        function startTimer() {
+            clearInterval(state.timerId);
+            state.timerId = setInterval(() => {
+                if(state.isExecuting) return; // Pause timer while running code
+                
+                state.timeRemaining--;
+                updateTimerDisplay();
+                
+                if (state.timeRemaining <= 0) {
+                    clearInterval(state.timerId);
+                    levelFailed("หมดเวลาแล้ว!");
+                }
+            }, 1000);
+        }
+
+        function stopTimer() {
+            clearInterval(state.timerId);
+        }
+
+        function loadLevel() {
+            const level = levelData[state.level];
+            state.rabbit = { ...level.start };
+            state.initialRabbit = { ...level.start };
+            state.timeRemaining = level.timeLimit;
+            state.commands = [];
+            state.isExecuting = false;
+            
+            renderMap();
+            renderCommands();
+            updateUI();
+            startTimer();
+        }
+
+        function startGame() {
+            document.getElementById('main-content').style.display = 'flex';
+            hideModals();
+            state.level = 0;
+            state.score = 0;
+            state.lives = 3;
+            loadLevel();
+        }
+
+        function resetGame() {
+            startGame();
+        }
+
+        function nextLevel() {
+            state.level++;
+            if (state.level >= levelData.length) {
+                // Victory
+                document.getElementById('victory-score').innerText = state.score;
+                showModal('victory');
+            } else {
+                hideModals();
+                loadLevel();
+            }
+        }
+
+        function retryLevel() {
+            hideModals();
+            // Reset rabbit position, keep commands so they can edit
+            state.rabbit = { ...state.initialRabbit };
+            updateRabbitPosition();
+            state.isExecuting = false;
+            startTimer(); // Resume timer
+        }
+
+        const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+        async function runSequence() {
+            if (state.isExecuting) return;
+            if (state.commands.length === 0) {
+                // Give a visual hint to add commands
+                elDropZone.classList.add('shake-animate');
+                setTimeout(() => elDropZone.classList.remove('shake-animate'), 500);
+                return;
+            }
+
+            state.isExecuting = true;
+            stopTimer(); // Pause timer while animating
+
+            // Reset rabbit to start position before running
+            state.rabbit = { ...state.initialRabbit };
+            updateRabbitPosition();
+            await sleep(300);
+
+            let executionSuccess = true;
+            let carrotCollected = false;
+            let failReason = "";
+
+            for (let i = 0; i < state.commands.length; i++) {
+                // Highlight current command
+                const blocks = elDropZone.querySelectorAll('.seq-cmd');
+                blocks.forEach(b => b.classList.remove('running-highlight'));
+                if (blocks[i]) blocks[i].classList.add('running-highlight');
+
+                const cmd = state.commands[i];
+                
+                // Execute logical move
+                if (cmd === 'forward') {
+                    let nx = state.rabbit.x;
+                    let ny = state.rabbit.y;
+                    
+                    if (state.rabbit.dir === 0) ny--;
+                    else if (state.rabbit.dir === 1) nx++;
+                    else if (state.rabbit.dir === 2) ny++;
+                    else if (state.rabbit.dir === 3) nx--;
+
+                    // Check bounds and obstacles
+                    if (nx < 0 || nx >= GRID_SIZE || ny < 0 || ny >= GRID_SIZE) {
+                        executionSuccess = false;
+                        failReason = "อ๊ะ! เดินชนขอบแผนที่";
+                        break;
+                    }
+                    if (levelData[state.level].grid[ny][nx] === 1) {
+                        executionSuccess = false;
+                        failReason = "โอ๊ย! ชนต้นไม้เต็มๆ";
+                        break;
+                    }
+                    
+                    // Move successful
+                    state.rabbit.x = nx;
+                    state.rabbit.y = ny;
+
+                } else if (cmd === 'left') {
+                    state.rabbit.dir = (state.rabbit.dir + 3) % 4; // -1 conceptually
+                } else if (cmd === 'right') {
+                    state.rabbit.dir = (state.rabbit.dir + 1) % 4;
+                } else if (cmd === 'collect') {
+                    // Check if on carrot tile
+                    if (levelData[state.level].grid[state.rabbit.y][state.rabbit.x] === 2) {
+                        carrotCollected = true;
+                        // visual cue
+                        const el = document.createElement('div');
+                        el.innerText = '✨';
+                        el.className = 'absolute text-4xl modal-animate z-20';
+                        el.style.left = `${state.rabbit.x * (100/GRID_SIZE) + 5}%`;
+                        el.style.top = `${state.rabbit.y * (100/GRID_SIZE) + 5}%`;
+                        elMapContainer.appendChild(el);
+                    } else {
+                        executionSuccess = false;
+                        failReason = "ตรงนี้ไม่มีแครอทให้เก็บนะ!";
+                        break;
+                    }
+                }
+
+                // Visual update
+                updateRabbitPosition();
+                await sleep(500); // Wait for animation
+            }
+
+            // Remove highlights
+            elDropZone.querySelectorAll('.seq-cmd').forEach(b => b.classList.remove('running-highlight'));
+
+            await sleep(300);
+
+            // Check outcome
+            if (!executionSuccess) {
+                elRabbit.parentElement.classList.add('shake-animate');
+                setTimeout(() => elMapContainer.classList.remove('shake-animate'), 500);
+                levelFailed(failReason);
+            } else if (!carrotCollected) {
+                levelFailed("เดินจบแล้ว แต่ยังไม่ได้เก็บแครอทเลย!");
+            } else {
+                levelWon();
+            }
+        }
+
+        function levelFailed(reason) {
+            state.lives--;
+            updateUI();
+            
+            document.getElementById('lose-message').innerText = reason;
+            
+            if (state.lives <= 0) {
+                document.getElementById('final-score').innerText = state.score;
+                setTimeout(() => showModal('gameover'), 500);
+            } else {
+                setTimeout(() => showModal('lose'), 500);
+            }
+        }
+
+        function levelWon() {
+            // Calculate score based on time remaining and level
+            const baseScore = 100 * (state.level + 1);
+            const timeBonus = state.timeRemaining * 2;
+            const levelScore = baseScore + timeBonus;
+            
+            state.score += levelScore;
+            updateUI();
+            
+            document.getElementById('win-score').innerText = `+${levelScore}`;
+            setTimeout(() => showModal('win'), 500);
+        }
+
+        // Initialize on Load
+        window.onload = () => {
+            showModal('start');
+            // Prevent context menu on draggable items to improve mobile touch hold
+            document.addEventListener('contextmenu', event => {
+                if (event.target.closest('.command-card')) {
+                    event.preventDefault();
+                }
+            });
+        };
+    </script>
+</body>
+</html>
